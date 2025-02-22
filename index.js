@@ -2,7 +2,7 @@
 import noble from "@abandonware/noble"; // For Bluetooth device scanning and connection.
 import spinner from "cli-spinner"; // For displaying a spinner in the CLI.
 import { Command } from "commander"; // For parsing command line arguments.
-import { createReadStream, createWriteStream } from "fs"; // For file I/O.
+import { createReadStream, createWriteStream, existsSync, mkdirSync } from "fs"; // For file I/O.
 import * as path from "path"; // For path-related operations.
 import { select, confirm } from "@inquirer/prompts"; // For interactive CLI prompts.
 import Jimp from "jimp"; // For image processing.
@@ -40,9 +40,40 @@ program
     "-s, --scale <size>",
     "percent scale at which the image should print (1-100)",
     100
+  )
+  .option(
+    "--test",
+    "Run in test mode and generate dithered images for all algorithms"
   );
 program.parse(process.argv);
-const { file, scale } = program.opts();
+const { file, scale, test } = program.opts();
+
+if (test) {
+  // In test mode: create the 'test' folder if it doesn't exist.
+  const testFolder = path.join(process.cwd(), "test");
+  if (!existsSync(testFolder)) {
+    mkdirSync(testFolder, { recursive: true });
+  }
+
+  // Loop through all algorithms and generate a test image for each.
+  const algorithms = Object.keys(ALGORITHMS);
+  for (const algo of algorithms) {
+    const outputPath = path.join(testFolder, `${algo}.png`);
+    console.log(`Generating test image using ${algo} algorithm...`);
+    try {
+      const ditheredPath = await makeTestDitheredImage(
+        file,
+        scale,
+        algo,
+        outputPath
+      );
+      console.log(`Saved: ${ditheredPath}`);
+    } catch (err) {
+      console.error(`Error generating ${algo}:`, err);
+    }
+  }
+  process.exit(0);
+}
 
 // Create a selection prompt using keys from ALGORITHMS.
 const algorithmChoice = await select({
@@ -425,6 +456,55 @@ async function convertToDithered(resizedImgPath, algorithmChoice) {
         this.pack()
           .pipe(createWriteStream(ditheredImgPath))
           .on("finish", () => resolve(ditheredImgPath))
+          .on("error", reject);
+      })
+      .on("error", reject);
+  });
+}
+
+// Helper function for test mode: Process the image using the selected dithering algorithm and output to a specific path.
+async function makeTestDitheredImage(
+  imgPath,
+  scale,
+  algorithmChoice,
+  outputPath
+) {
+  let originalFileName = path.basename(imgPath);
+  if (!originalFileName) {
+    throw new Error("Invalid file name");
+  }
+  let pic = await Jimp.read(imgPath);
+  const scalePercentage = Math.max(scale / 100.0, 0.01);
+  const scaledWidth = Math.floor(scalePercentage * IMAGE_WIDTH);
+
+  // Resize the image.
+  const resizedImgPath = `${imgPath}--resized.png`;
+  pic = pic.resize(scaledWidth, Jimp.AUTO);
+
+  // Read the transparent background image.
+  let transparentBackground = await Jimp.read("./transparent-square.png");
+  transparentBackground = transparentBackground.resize(
+    IMAGE_WIDTH,
+    pic.bitmap.height
+  );
+
+  // Calculate offset and composite image.
+  const x = IMAGE_WIDTH - pic.bitmap.width;
+  const composedPic = transparentBackground.composite(pic, x, 0);
+
+  // Save the composed image.
+  await composedPic.writeAsync(resizedImgPath);
+
+  // Convert the composed image to a dithered image and write directly to outputPath.
+  return new Promise((resolve, reject) => {
+    createReadStream(resizedImgPath)
+      .pipe(new PNG())
+      .on("parsed", function () {
+        // 'this' is the PNG image object.
+        dither(this, ALGORITHMS[algorithmChoice]);
+        this.pack()
+          .pipe(createWriteStream(outputPath))
+          .on("finish", () => resolve(outputPath))
           .on("error", reject);
       })
       .on("error", reject);
