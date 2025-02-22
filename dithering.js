@@ -20,6 +20,9 @@
  *    - STUCKI
  *    - CUSTOM
  *    - GRAYSCALE  <-- New: converts the image to grayscale only without dithering.
+ *    - ORDERED_BAYER  <-- New: ordered dithering using a Bayer matrix.
+ *    - RANDOM         <-- New: random dithering using a random threshold per pixel.
+ *    - DITHERPUNK     <-- New: noise-injected threshold dithering.
  *
  * License: MIT
  */
@@ -36,7 +39,10 @@ export const ALGORITHMS = {
   SIERRA2: "SIERRA2",
   STUCKI: "STUCKI",
   CUSTOM: "CUSTOM",
-  GRAYSCALE: "GRAYSCALE"
+  GRAYSCALE: "GRAYSCALE",
+  ORDERED_BAYER: "ORDERED_BAYER", // New
+  RANDOM: "RANDOM", // New
+  DITHERPUNK: "DITHERPUNK", // New
 };
 
 /**
@@ -75,10 +81,18 @@ export function dither(image, algorithm, options = {}) {
       if (typeof options.custom === "function") {
         return options.custom(image);
       }
-      throw new Error("For CUSTOM algorithm, supply a custom function in options.custom");
-    case ALGORITHMS.GRAYSCALE:  // New case: Grayscale-only
+      throw new Error(
+        "For CUSTOM algorithm, supply a custom function in options.custom"
+      );
+    case ALGORITHMS.GRAYSCALE: // Grayscale-only
       toGrayscale(image);
       return image;
+    case ALGORITHMS.ORDERED_BAYER: // Ordered dithering using a Bayer matrix
+      return orderedBayer(image);
+    case ALGORITHMS.RANDOM: // Random dithering
+      return randomDither(image);
+    case ALGORITHMS.DITHERPUNK: // Ditherpunk: noise-injected threshold dithering
+      return ditherpunk(image);
     default:
       throw new Error("Unknown algorithm: " + algorithm);
   }
@@ -91,14 +105,16 @@ function toGrayscale(image) {
   const data = image.data;
   const len = data.length;
   for (let i = 0; i < len; i += 4) {
-    const lum = Math.floor(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+    const lum = Math.floor(
+      0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
+    );
     data[i] = data[i + 1] = data[i + 2] = lum;
   }
 }
 
 /**
  * Error diffusion helper.
- * Applies the given kernel (array of [dx,dy,weight] values) with a divisor.
+ * Applies the given kernel (array of [dx, dy, weight] values) with a divisor.
  */
 function errorDiffusion(image, kernel, divisor) {
   const { width: w, height: h, data } = image;
@@ -133,12 +149,16 @@ function addError(data, w, h, x, y, error, factor) {
  */
 function floydSteinberg(image) {
   toGrayscale(image);
-  return errorDiffusion(image, [
-    [1, 0, 7],
-    [-1, 1, 3],
-    [0, 1, 5],
-    [1, 1, 1]
-  ], 16);
+  return errorDiffusion(
+    image,
+    [
+      [1, 0, 7],
+      [-1, 1, 3],
+      [0, 1, 5],
+      [1, 1, 1],
+    ],
+    16
+  );
 }
 
 /**
@@ -146,14 +166,18 @@ function floydSteinberg(image) {
  */
 function atkinson(image) {
   toGrayscale(image);
-  return errorDiffusion(image, [
-    [1, 0, 1],
-    [2, 0, 1],
-    [-1, 1, 1],
-    [0, 1, 1],
-    [1, 1, 1],
-    [0, 2, 1]
-  ], 8);
+  return errorDiffusion(
+    image,
+    [
+      [1, 0, 1],
+      [2, 0, 1],
+      [-1, 1, 1],
+      [0, 1, 1],
+      [1, 1, 1],
+      [0, 2, 1],
+    ],
+    8
+  );
 }
 
 /**
@@ -161,7 +185,8 @@ function atkinson(image) {
  */
 function threshold(image) {
   toGrayscale(image);
-  const data = image.data, len = data.length;
+  const data = image.data,
+    len = data.length;
   for (let i = 0; i < len; i += 4) {
     const newPixel = data[i] < 128 ? 0 : 255;
     data[i] = data[i + 1] = data[i + 2] = newPixel;
@@ -174,15 +199,19 @@ function threshold(image) {
  */
 function burkes(image) {
   toGrayscale(image);
-  return errorDiffusion(image, [
-    [1, 0, 8],
-    [2, 0, 4],
-    [-2, 1, 2],
-    [-1, 1, 4],
-    [0, 1, 8],
-    [1, 1, 4],
-    [2, 1, 2]
-  ], 32);
+  return errorDiffusion(
+    image,
+    [
+      [1, 0, 8],
+      [2, 0, 4],
+      [-2, 1, 2],
+      [-1, 1, 4],
+      [0, 1, 8],
+      [1, 1, 4],
+      [2, 1, 2],
+    ],
+    32
+  );
 }
 
 /**
@@ -190,10 +219,14 @@ function burkes(image) {
  */
 function diffusionRow(image) {
   toGrayscale(image);
-  return errorDiffusion(image, [
-    [1, 0, 1],
-    [2, 0, 1]
-  ], 2);
+  return errorDiffusion(
+    image,
+    [
+      [1, 0, 1],
+      [2, 0, 1],
+    ],
+    2
+  );
 }
 
 /**
@@ -201,10 +234,14 @@ function diffusionRow(image) {
  */
 function diffusionColumn(image) {
   toGrayscale(image);
-  return errorDiffusion(image, [
-    [0, 1, 1],
-    [0, 2, 1]
-  ], 2);
+  return errorDiffusion(
+    image,
+    [
+      [0, 1, 1],
+      [0, 2, 1],
+    ],
+    2
+  );
 }
 
 /**
@@ -212,12 +249,16 @@ function diffusionColumn(image) {
  */
 function diffusion2D(image) {
   toGrayscale(image);
-  return errorDiffusion(image, [
-    [1, 0, 3],
-    [-1, 1, 2],
-    [0, 1, 3],
-    [1, 1, 2]
-  ], 10);
+  return errorDiffusion(
+    image,
+    [
+      [1, 0, 3],
+      [-1, 1, 2],
+      [0, 1, 3],
+      [1, 1, 2],
+    ],
+    10
+  );
 }
 
 /**
@@ -225,20 +266,24 @@ function diffusion2D(image) {
  */
 function jarvisJudiceNinke(image) {
   toGrayscale(image);
-  return errorDiffusion(image, [
-    [1, 0, 7],
-    [2, 0, 5],
-    [-2, 1, 3],
-    [-1, 1, 5],
-    [0, 1, 7],
-    [1, 1, 5],
-    [2, 1, 3],
-    [-2, 2, 1],
-    [-1, 2, 3],
-    [0, 2, 5],
-    [1, 2, 3],
-    [2, 2, 1]
-  ], 48);
+  return errorDiffusion(
+    image,
+    [
+      [1, 0, 7],
+      [2, 0, 5],
+      [-2, 1, 3],
+      [-1, 1, 5],
+      [0, 1, 7],
+      [1, 1, 5],
+      [2, 1, 3],
+      [-2, 2, 1],
+      [-1, 2, 3],
+      [0, 2, 5],
+      [1, 2, 3],
+      [2, 2, 1],
+    ],
+    48
+  );
 }
 
 /**
@@ -246,18 +291,22 @@ function jarvisJudiceNinke(image) {
  */
 function sierra2(image) {
   toGrayscale(image);
-  return errorDiffusion(image, [
-    [1, 0, 4],
-    [2, 0, 3],
-    [-2, 1, 1],
-    [-1, 1, 2],
-    [0, 1, 3],
-    [1, 1, 2],
-    [2, 1, 1],
-    [-1, 2, 1],
-    [0, 2, 2],
-    [1, 2, 1]
-  ], 12);
+  return errorDiffusion(
+    image,
+    [
+      [1, 0, 4],
+      [2, 0, 3],
+      [-2, 1, 1],
+      [-1, 1, 2],
+      [0, 1, 3],
+      [1, 1, 2],
+      [2, 1, 1],
+      [-1, 2, 1],
+      [0, 2, 2],
+      [1, 2, 1],
+    ],
+    12
+  );
 }
 
 /**
@@ -265,18 +314,93 @@ function sierra2(image) {
  */
 function stucki(image) {
   toGrayscale(image);
-  return errorDiffusion(image, [
-    [1, 0, 8],
-    [2, 0, 4],
-    [-2, 1, 2],
-    [-1, 1, 4],
-    [0, 1, 8],
-    [1, 1, 4],
-    [2, 1, 2],
-    [-2, 2, 1],
-    [-1, 2, 2],
-    [0, 2, 4],
-    [1, 2, 2],
-    [2, 2, 1]
-  ], 42);
+  return errorDiffusion(
+    image,
+    [
+      [1, 0, 8],
+      [2, 0, 4],
+      [-2, 1, 2],
+      [-1, 1, 4],
+      [0, 1, 8],
+      [1, 1, 4],
+      [2, 1, 2],
+      [-2, 2, 1],
+      [-1, 2, 2],
+      [0, 2, 4],
+      [1, 2, 2],
+      [2, 2, 1],
+    ],
+    42
+  );
+}
+
+/* ===================== New Algorithms ===================== */
+
+/**
+ * Ordered Bayer dithering.
+ * Uses a 4x4 Bayer matrix to threshold pixels in an ordered pattern.
+ */
+function orderedBayer(image) {
+  toGrayscale(image);
+  const data = image.data;
+  const w = image.width,
+    h = image.height;
+  const bayerMatrix = [
+    [0, 8, 2, 10],
+    [12, 4, 14, 6],
+    [3, 11, 1, 9],
+    [15, 7, 13, 5],
+  ];
+  const matrixSize = 4;
+  // The matrix values range from 0 to 15. We map these to thresholds [0,255]
+  const scale = 255 / (matrixSize * matrixSize);
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = (y * w + x) * 4;
+      // Determine threshold from the Bayer matrix and add half the step to center it
+      const threshold =
+        (bayerMatrix[y % matrixSize][x % matrixSize] + 0.5) * scale;
+      const oldPixel = data[idx];
+      const newPixel = oldPixel < threshold ? 0 : 255;
+      data[idx] = data[idx + 1] = data[idx + 2] = newPixel;
+    }
+  }
+  return image;
+}
+
+/**
+ * Random dithering.
+ * Each pixel is compared against a random threshold.
+ */
+function randomDither(image) {
+  toGrayscale(image);
+  const data = image.data;
+  const len = data.length;
+  for (let i = 0; i < len; i += 4) {
+    const threshold = Math.random() * 255;
+    const oldPixel = data[i];
+    const newPixel = oldPixel < threshold ? 0 : 255;
+    data[i] = data[i + 1] = data[i + 2] = newPixel;
+  }
+  return image;
+}
+
+/**
+ * Ditherpunk algorithm.
+ * A creative twist on threshold dithering by adding noise before thresholding.
+ */
+function ditherpunk(image) {
+  toGrayscale(image);
+  const data = image.data;
+  const len = data.length;
+  // Add noise to each pixel and then threshold
+  for (let i = 0; i < len; i += 4) {
+    // Add noise in the range [-64, 64]
+    const noise = (Math.random() - 0.5) * 128;
+    const noisyPixel = data[i] + noise;
+    const newPixel = noisyPixel < 128 ? 0 : 255;
+    data[i] = data[i + 1] = data[i + 2] = newPixel;
+  }
+  return image;
 }
