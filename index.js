@@ -26,6 +26,7 @@ const QUIT_SELECTION = "__quit__";
 
 // Object to hold discovered Bluetooth devices.
 let discoveredDevices = {};
+let selectedPeripheral = null; // <-- Added global variable for the peripheral
 
 // -------------------------
 // Command line interface setup
@@ -79,7 +80,36 @@ if (adjustDensity) {
 // ---------------------------------------------------------
 
 const data = await getPrintDataFromPort(printableImgPath);
-characteristic.write(Buffer.from(data), true);
+
+// Write print data and wait until it's sent.
+await new Promise((resolve, reject) => {
+  characteristic.write(Buffer.from(data), true, (err) => {
+    if (err) {
+      return reject(err);
+    }
+    resolve();
+  });
+});
+
+console.log("Print data sent.");
+
+// Prompt the user to confirm that the image printed successfully.
+const printedOk = await confirm({
+  message: "Did the image print successfully?",
+});
+
+if (selectedPeripheral) {
+  // Disconnect from the Bluetooth device.
+  await selectedPeripheral.disconnectAsync();
+}
+
+if (printedOk) {
+  console.log("Printing confirmed. Exiting.");
+  process.exit(0);
+} else {
+  console.log("Printing not confirmed. Exiting anyway.");
+  process.exit(1);
+}
 
 // -------------------------
 // Helper Functions
@@ -122,6 +152,7 @@ async function getDeviceCharacteristicMenu(printableImgPath) {
         }
       } else {
         // Return the writable characteristic if available.
+        selectedPeripheral = peripheral; // Store peripheral globally
         return characteristic;
       }
     }
