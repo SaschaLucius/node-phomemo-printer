@@ -47,12 +47,12 @@ const { file, scale } = program.opts();
 // Create a selection prompt using keys from ALGORITHMS.
 const algorithmChoice = await select({
   message: "Select dithering algorithm:",
-  choices: Object.keys(ALGORITHMS).map(key => ({
+  choices: Object.keys(ALGORITHMS).map((key) => ({
     // The key is used as both the display and value.
-    value: key
+    value: key,
   })),
   default: "FLOYD_STEINBERG",
-  pageSize: Object.keys(ALGORITHMS).length
+  pageSize: Object.keys(ALGORITHMS).length,
 });
 
 // Now that algorithmChoice is defined, pass it in:
@@ -60,8 +60,8 @@ const printableImgPath = await makeDitheredImage(file, scale, algorithmChoice);
 const characteristic = await getDeviceCharacteristicMenu(printableImgPath);
 
 // ----- NEW: Ask user whether to adjust printer density -----
-const adjustDensity = await confirm({ 
-  message: "Would you like to adjust printer density (black intensity)?" 
+const adjustDensity = await confirm({
+  message: "Would you like to adjust printer density (black intensity)?",
 });
 if (adjustDensity) {
   // Prompt the user to select a density level.
@@ -71,7 +71,7 @@ if (adjustDensity) {
     choices: [
       { name: "Soft", value: 0x40 },
       { name: "Medium", value: 0x80 },
-      { name: "Strong", value: 0xff }
+      { name: "Strong", value: 0xff },
     ],
     pageSize: 3,
   });
@@ -231,101 +231,129 @@ async function promptTryAgain() {
   return confirm({ message: "want to try again?" });
 }
 
-// This function reads the dithered image, converts it into printer commands,
+// This asynchronous function loads a dithered image from a file,
+// converts it into a series of printer commands (following an ESC/POS‑style protocol),
 // and returns an array of bytes that represent the complete print data.
 async function getPrintDataFromPort(printableImgPath) {
+  // Load the image using Jimp (a Node.js image library)
   const pic = await Jimp.read(printableImgPath);
+  // 'remaining' holds the number of rows (vertical pixels) that need to be printed.
   let remaining = pic.bitmap.height;
+  // 'printData' is our byte array that will contain the complete command stream.
   let printData = [];
   let index = 0;
 
   // ----- PRINTING HEADER -----
-  // Following sequences are based on the printer's command protocol.
+  // The header consists of commands that initialize the printer and set basic formatting.
 
-  // Initialize printer.
-  printData[index++] = 27;
-  printData[index++] = 64;
+  // ESC @ (27, 64): This command initializes the printer (resets it to default settings).
+  printData[index++] = 27; // ESC (Escape, ASCII 27)
+  printData[index++] = 64; // '@'
 
-  // Select justification command.
-  printData[index++] = 27;
-  printData[index++] = 97;
+  // ESC a (27, 97): This command selects the justification (text alignment).
+  // It is followed by one byte that indicates the desired alignment:
+  // 0 = left, 1 = center, 2 = right.
+  printData[index++] = 27; // ESC
+  printData[index++] = 97; // 'a'
+  printData[index++] = 0; // 0 means left-justified
 
-  // Justify left (0=left, 1=center, 2=right).
-  printData[index++] = 0;
-
-  // End of header codes.
-  printData[index++] = 31;
-  printData[index++] = 17;
-  printData[index++] = 2;
-  printData[index++] = 4;
+  // These additional bytes (31, 17, 2, 4) are part of the printer’s initialization/header.
+  // In many ESC/POS implementations, commands following the basic ones can be used to set specific modes
+  // (such as print density, line spacing, or other manufacturer-specific settings).
+  // Their exact meaning can vary by printer model.
+  printData[index++] = 31; // (ASCII Unit Separator, sometimes used as a header delimiter)
+  printData[index++] = 17; // (Device Control 1)
+  printData[index++] = 2; // Parameter byte (could indicate a setting like print density/speed)
+  printData[index++] = 4; // Another parameter byte
   // -----------------------------
 
+  // 'line' keeps track of which row of the image we are processing.
   let line = 0;
 
-  // Loop through each group of lines based on how many rows remain.
+  // The image is processed in blocks of up to 256 lines because of protocol limitations.
   while (remaining > 0) {
     let lines = remaining;
     if (lines > 256) {
-      lines = 256; // Limit block height to 256 lines due to protocol constraints.
+      lines = 256; // Maximum block height: 256 lines.
     }
 
     // ----- PRINTING MARKER -----
-    // Command for printing a raster bit image block.
-    printData[index++] = 29;
-    printData[index++] = 118;
-    printData[index++] = 48;
+    // Now we insert the command to print a raster bit image.
+    // In Epson ESC/POS, the command for printing a raster image is GS v 0.
+    // GS is ASCII 29, 'v' is ASCII 118, and '0' is ASCII 48.
+    printData[index++] = 29; // GS (Group Separator, ASCII 29)
+    printData[index++] = 118; // 'v'
+    printData[index++] = 48; // '0'
 
-    // Mode for raster image printing.
-    // Mode: 0=normal, 1=double width, 2=double height, 3=quadruple.
+    // Next comes the mode byte:
+    // For Epson printers, the mode can control scaling (normal, double-width, double-height, or quadruple).
+    // Here we use mode 0, which means "normal" (no scaling).
     printData[index++] = 0;
 
-    // Write the number of bytes per line.
-    printData[index++] = BYTES_PER_LINE;
-    printData[index++] = 0;
+    // Then we specify the horizontal data: the number of bytes per line.
+    // This value is sent as a 16-bit little-endian number.
+    // 'BYTES_PER_LINE' is a constant (pre-calculated as image width/8) that tells how many bytes represent one line.
+    printData[index++] = BYTES_PER_LINE; // Lower byte of the horizontal byte count
+    printData[index++] = 0; // Upper byte (assuming BYTES_PER_LINE is less than 256)
 
-    // Number of lines to print in this block (minus one).
-    printData[index++] = lines - 1;
-    printData[index++] = 0;
+    // Next, we specify the block height (the number of lines in this block) minus one.
+    // This value is also given as a 16-bit little-endian number.
+    printData[index++] = lines - 1; // Lower byte: (block height - 1)
+    printData[index++] = 0; // Upper byte
     // -----------------------------
 
+    // Deduct the lines we are about to process.
     remaining -= lines;
 
-    // Process each line.
+    // For each line in the current block:
     while (lines > 0) {
-      // Process each byte of the current line.
+      // For each horizontal block of 8 pixels (one byte), repeat:
       for (let x = 0; x < BYTES_PER_LINE; x++) {
-        let byte = 0;
-
-        // Each byte represents 8 pixels; loop through each bit.
+        let byte = 0; // This byte will represent 8 pixels (1 bit per pixel)
         for (let bit = 0; bit < 8; bit++) {
-          const rgba = Jimp.intToRGBA(pic.getPixelColor(x * 8 + bit, line));
-          // If the pixel is black and not transparent, set corresponding bit.
+          // Calculate the x coordinate: each byte represents 8 pixels.
+          const pixelX = x * 8 + bit;
+          const pixelY = line;
+          // Get the color of the pixel at (pixelX, pixelY) and convert it into an RGBA object.
+          const rgba = Jimp.intToRGBA(pic.getPixelColor(pixelX, pixelY));
+          // In our dithered image, a pixel is “on” (black) if its red component is 0
+          // and it is not transparent (alpha ≠ 0). If so, we set the corresponding bit.
           if (rgba.r === 0 && rgba.a !== 0) {
             byte |= 1 << (7 - bit);
           }
         }
-        // Special handling: if byte value equals newline, change it.
+        // Special handling: if the byte equals 0x0A (line feed), replace it with 0x14.
+        // This avoids conflicts with actual line-feed commands in the protocol.
         if (byte === 0x0a) {
           byte = 0x14;
         }
+        // Append this byte (representing 8 pixels) to our printData array.
         printData[index++] = byte;
       }
-      lines--;
-      line++;
+      // One line of image data is done; update counters.
+      lines--; // One less line to process in the current block.
+      line++; // Move to the next line in the overall image.
     }
   }
 
   // ----- PRINTING FOOTER -----
-  // Commands to feed some empty lines after the image.
-  printData[index++] = 27;
-  printData[index++] = 100;
-  printData[index++] = 2;
+  // After sending all image data, we add footer commands.
+  // These commands typically feed extra blank lines to push the printed image fully out of the printer,
+  // and may also signal the end of the print job.
 
-  printData[index++] = 27;
-  printData[index++] = 100;
-  printData[index++] = 2;
+  // ESC d n (27, 100, n): This command prints the data in the buffer and feeds paper n lines.
+  // Here, we feed 2 lines, twice.
+  printData[index++] = 27; // ESC
+  printData[index++] = 100; // 'd'
+  printData[index++] = 2; // Feed 2 lines
 
-  // Additional footer printer commands.
+  printData[index++] = 27; // ESC
+  printData[index++] = 100; // 'd'
+  printData[index++] = 2; // Feed another 2 lines
+
+  // These additional footer bytes (31, 17, followed by 8, 14, 7, 9) are likely proprietary or
+  // manufacturer-specific commands that signal the end of the print job and ensure that the paper is
+  // properly positioned for cutting or finishing.
   printData[index++] = 31;
   printData[index++] = 17;
   printData[index++] = 8;
@@ -343,6 +371,7 @@ async function getPrintDataFromPort(printableImgPath) {
   printData[index++] = 9;
   // -----------------------------
 
+  // Finally, return the complete array of commands and image data.
   return printData;
 }
 
@@ -418,5 +447,7 @@ async function sendDensityControlPacket(characteristic, density) {
   ];
   // Write the packet to the printer.
   characteristic.write(Buffer.from(packet), true);
-  console.log(`Density control packet sent with density: 0x${density.toString(16)}`);
+  console.log(
+    `Density control packet sent with density: 0x${density.toString(16)}`
+  );
 }
