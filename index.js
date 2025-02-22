@@ -2,12 +2,14 @@
 import noble from "@abandonware/noble"; // For Bluetooth device scanning and connection.
 import spinner from "cli-spinner"; // For displaying a spinner in the CLI.
 import { Command } from "commander"; // For parsing command line arguments.
-import floydSteinberg from "floyd-steinberg"; // For image dithering.
 import { createReadStream, createWriteStream } from "fs"; // For file I/O.
 import * as path from "path"; // For path-related operations.
 import { select, confirm } from "@inquirer/prompts"; // For interactive CLI prompts.
 import Jimp from "jimp"; // For image processing.
 import { PNG } from "pngjs"; // For PNG parsing and manipulation.
+
+// Use your user‑defined dithering library.
+import { dither, ALGORITHMS } from "./dithering.js";
 
 const { Spinner } = spinner;
 
@@ -41,10 +43,19 @@ program
 program.parse(process.argv);
 const { file, scale } = program.opts();
 
-// Process the image: first create a dithered version that fits the printer,
-// then select a writable Bluetooth characteristic on the printer.
-// Finally, extract print data from the image and send it to the device.
-const printableImgPath = await makeDitheredImage(file, scale);
+// Create a selection prompt using keys from ALGORITHMS.
+const algorithmChoice = await select({
+  message: "Select dithering algorithm:",
+  choices: Object.keys(ALGORITHMS).map(key => ({
+    // The key is used as both the display and value.
+    value: key
+  })),
+  default: "FLOYD_STEINBERG",
+  pageSize: Object.keys(ALGORITHMS).length
+});
+
+// Now that algorithmChoice is defined, pass it in:
+const printableImgPath = await makeDitheredImage(file, scale, algorithmChoice);
 const characteristic = await getDeviceCharacteristicMenu(printableImgPath);
 
 // ----- NEW: Ask user whether to adjust printer density -----
@@ -307,11 +318,10 @@ async function getPrintDataFromPort(printableImgPath) {
 // This function processes the image file to match the printer's requirements.
 // It performs several steps: resizing, compositing with a transparent background,
 // and finally dithering.
-async function makeDitheredImage(imgPath, scale) {
-  // Get the original file name (not used further here, could be utilized for logging).
-  let originalFileName = path.basename("path");
+async function makeDitheredImage(imgPath, scale, algorithmChoice) {
+  let originalFileName = path.basename(imgPath);
   if (!originalFileName) {
-    throw new Error();
+    throw new Error("Invalid file name");
   }
   let pic = await Jimp.read(imgPath);
   const scalePercentage = Math.max(scale / 100.0, 0.01);
@@ -336,21 +346,28 @@ async function makeDitheredImage(imgPath, scale) {
 
   // Convert the composed image to a dithered black & white image.
   // TODO: Consider swapping the dithering library for improved quality.
-  return convertToDithered(resizedImgPath);
+  return convertToDithered(resizedImgPath, algorithmChoice);
 }
 
 // This function performs image dithering using the Floyd-Steinberg algorithm.
 // It converts a resized image into a dithered image suitable for the printer.
-async function convertToDithered(resizedImgPath) {
+async function convertToDithered(resizedImgPath, algorithmChoice) {
   const ditheredImgPath = `${resizedImgPath}--dithered.png`;
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     createReadStream(resizedImgPath)
       .pipe(new PNG())
       .on("parsed", function () {
-        // Run the Floyd-Steinberg algorithm and write the resulting image.
-        floydSteinberg(this).pack().pipe(createWriteStream(ditheredImgPath));
-        resolve(ditheredImgPath);
-      });
+        // 'this' is the PNG image object with width, height, and data properties.
+        // Apply the selected dithering algorithm using your library.
+        // Lookup the algorithm from ALGORITHMS using the algorithmChoice key.
+        dither(this, ALGORITHMS[algorithmChoice]);
+        // Pack the modified image data and pipe it to a write stream.
+        this.pack()
+          .pipe(createWriteStream(ditheredImgPath))
+          .on("finish", () => resolve(ditheredImgPath))
+          .on("error", reject);
+      })
+      .on("error", reject);
   });
 }
 
