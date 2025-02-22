@@ -35,7 +35,7 @@ let selectedPeripheral = null; // <-- Added global variable for the peripheral
 // Set up command line options using Commander.
 const program = new Command();
 program
-  .option("-f, --file <path>", "path for image to print", "./burger.png")
+  .option("-f, --file <path>", "path for image to print", "./test.png")
   .option(
     "-s, --scale <size>",
     "percent scale at which the image should print (1-100)",
