@@ -38,7 +38,7 @@ export const ALGORITHMS = {
   JARVIS_JUDICE_NINKE: "JARVIS_JUDICE_NINKE",
   SIERRA2: "SIERRA2",
   STUCKI: "STUCKI",
-  CUSTOM: "CUSTOM",
+  // CUSTOM: "CUSTOM",
   GRAYSCALE: "GRAYSCALE",
   ORDERED_BAYER: "ORDERED_BAYER", // New
   RANDOM: "RANDOM", // New
@@ -58,25 +58,25 @@ export const ALGORITHMS = {
 export function dither(image, algorithm, options = {}) {
   switch (algorithm) {
     case ALGORITHMS.FLOYD_STEINBERG:
-      return floydSteinberg(image);
+      return floydSteinberg(image, options);
     case ALGORITHMS.ATKINSON:
-      return atkinson(image);
+      return atkinson(image, options);
     case ALGORITHMS.THRESHOLD:
       return threshold(image);
     case ALGORITHMS.BURKES:
-      return burkes(image);
+      return burkes(image, options);
     case ALGORITHMS.DIFFUSION_ROW:
-      return diffusionRow(image);
+      return diffusionRow(image, options);
     case ALGORITHMS.DIFFUSION_COLUMN:
-      return diffusionColumn(image);
+      return diffusionColumn(image, options);
     case ALGORITHMS.DIFFUSION_2D:
-      return diffusion2D(image);
+      return diffusion2D(image, options);
     case ALGORITHMS.JARVIS_JUDICE_NINKE:
-      return jarvisJudiceNinke(image);
+      return jarvisJudiceNinke(image, options);
     case ALGORITHMS.SIERRA2:
-      return sierra2(image);
+      return sierra2(image, options);
     case ALGORITHMS.STUCKI:
-      return stucki(image);
+      return stucki(image, options);
     case ALGORITHMS.CUSTOM:
       if (typeof options.custom === "function") {
         return options.custom(image);
@@ -115,18 +115,36 @@ function toGrayscale(image) {
 /**
  * Error diffusion helper.
  * Applies the given kernel (array of [dx, dy, weight] values) with a divisor.
+ * Supports serpentine scanning: when enabled, on odd rows pixels are processed
+ * right-to-left and the dx offsets are reversed.
  */
-function errorDiffusion(image, kernel, divisor) {
+function errorDiffusion(image, kernel, divisor, serpentine = false) {
   const { width: w, height: h, data } = image;
   for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const idx = (y * w + x) * 4;
-      const oldPixel = data[idx];
-      const newPixel = oldPixel < 128 ? 0 : 255;
-      const error = oldPixel - newPixel;
-      data[idx] = data[idx + 1] = data[idx + 2] = newPixel;
-      for (const [dx, dy, weight] of kernel) {
-        addError(data, w, h, x + dx, y + dy, error, weight / divisor);
+    const reverse = serpentine && (y % 2 === 1);
+    if (reverse) {
+      for (let x = w - 1; x >= 0; x--) {
+        const idx = (y * w + x) * 4;
+        const oldPixel = data[idx];
+        const newPixel = oldPixel < 128 ? 0 : 255;
+        const error = oldPixel - newPixel;
+        data[idx] = data[idx + 1] = data[idx + 2] = newPixel;
+        for (const [dx, dy, weight] of kernel) {
+          // Mirror x offset on reversed scan
+          const effectiveDx = -dx;
+          addError(data, w, h, x + effectiveDx, y + dy, error, weight / divisor);
+        }
+      }
+    } else {
+      for (let x = 0; x < w; x++) {
+        const idx = (y * w + x) * 4;
+        const oldPixel = data[idx];
+        const newPixel = oldPixel < 128 ? 0 : 255;
+        const error = oldPixel - newPixel;
+        data[idx] = data[idx + 1] = data[idx + 2] = newPixel;
+        for (const [dx, dy, weight] of kernel) {
+          addError(data, w, h, x + dx, y + dy, error, weight / divisor);
+        }
       }
     }
   }
@@ -147,8 +165,9 @@ function addError(data, w, h, x, y, error, factor) {
 /**
  * Floyd-Steinberg algorithm.
  */
-function floydSteinberg(image) {
+function floydSteinberg(image, opts = {}) {
   toGrayscale(image);
+  const serpentine = !!opts.serpentine;
   return errorDiffusion(
     image,
     [
@@ -157,15 +176,17 @@ function floydSteinberg(image) {
       [0, 1, 5],
       [1, 1, 1],
     ],
-    16
+     16,
+    serpentine
   );
 }
 
 /**
  * Atkinson algorithm.
  */
-function atkinson(image) {
+function atkinson(image, opts = {}) {
   toGrayscale(image);
+  const serpentine = !!opts.serpentine;
   return errorDiffusion(
     image,
     [
@@ -176,7 +197,8 @@ function atkinson(image) {
       [1, 1, 1],
       [0, 2, 1],
     ],
-    8
+     8,
+    serpentine
   );
 }
 
@@ -197,8 +219,9 @@ function threshold(image) {
 /**
  * Burkes algorithm.
  */
-function burkes(image) {
+function burkes(image, opts = {}) {
   toGrayscale(image);
+  const serpentine = !!opts.serpentine;
   return errorDiffusion(
     image,
     [
@@ -210,45 +233,51 @@ function burkes(image) {
       [1, 1, 4],
       [2, 1, 2],
     ],
-    32
+     32,
+    serpentine
   );
 }
 
 /**
  * Diffusion Row: Diffuse error horizontally.
  */
-function diffusionRow(image) {
+function diffusionRow(image, opts = {}) {
   toGrayscale(image);
+  const serpentine = !!opts.serpentine;
   return errorDiffusion(
     image,
     [
       [1, 0, 1],
       [2, 0, 1],
     ],
-    2
+     2,
+    serpentine
   );
 }
 
 /**
  * Diffusion Column: Diffuse error vertically.
  */
-function diffusionColumn(image) {
+function diffusionColumn(image, opts = {}) {
   toGrayscale(image);
+  const serpentine = !!opts.serpentine;
   return errorDiffusion(
     image,
     [
       [0, 1, 1],
       [0, 2, 1],
     ],
-    2
+     2,
+    serpentine
   );
 }
 
 /**
  * Diffusion 2D: A simple two-dimensional diffusion.
  */
-function diffusion2D(image) {
+function diffusion2D(image, opts = {}) {
   toGrayscale(image);
+  const serpentine = !!opts.serpentine;
   return errorDiffusion(
     image,
     [
@@ -257,15 +286,17 @@ function diffusion2D(image) {
       [0, 1, 3],
       [1, 1, 2],
     ],
-    10
+     10,
+    serpentine
   );
 }
 
 /**
  * Jarvis, Judice, Ninke algorithm.
  */
-function jarvisJudiceNinke(image) {
+function jarvisJudiceNinke(image, opts = {}) {
   toGrayscale(image);
+  const serpentine = !!opts.serpentine;
   return errorDiffusion(
     image,
     [
@@ -282,15 +313,17 @@ function jarvisJudiceNinke(image) {
       [1, 2, 3],
       [2, 2, 1],
     ],
-    48
+     48,
+    serpentine
   );
 }
 
 /**
  * Sierra2 algorithm.
  */
-function sierra2(image) {
+function sierra2(image, opts = {}) {
   toGrayscale(image);
+  const serpentine = !!opts.serpentine;
   return errorDiffusion(
     image,
     [
@@ -305,15 +338,17 @@ function sierra2(image) {
       [0, 2, 2],
       [1, 2, 1],
     ],
-    12
+     12,
+    serpentine
   );
 }
 
 /**
  * Stucki algorithm.
  */
-function stucki(image) {
+function stucki(image, opts = {}) {
   toGrayscale(image);
+  const serpentine = !!opts.serpentine;
   return errorDiffusion(
     image,
     [
@@ -330,7 +365,8 @@ function stucki(image) {
       [1, 2, 2],
       [2, 2, 1],
     ],
-    42
+     42,
+    serpentine
   );
 }
 
