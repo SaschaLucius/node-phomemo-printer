@@ -1,7 +1,7 @@
 /**
  * dithering.js
  *
- * A Node.js library for applying various dithering algorithms to an image.
+ * A Node.js library for applying various algorithms to an image.
  * The input “image” must follow the PNG imageData spec:
  *    - image.width: image width (pixels)
  *    - image.height: image height (pixels)
@@ -19,6 +19,7 @@
  *    - SIERRA2
  *    - STUCKI
  *    - CUSTOM
+ *    - GRAYSCALE  <-- New: converts the image to grayscale only without dithering.
  *
  * License: MIT
  */
@@ -34,13 +35,14 @@ export const ALGORITHMS = {
   JARVIS_JUDICE_NINKE: "JARVIS_JUDICE_NINKE",
   SIERRA2: "SIERRA2",
   STUCKI: "STUCKI",
-  CUSTOM: "CUSTOM"
+  CUSTOM: "CUSTOM",
+  GRAYSCALE: "GRAYSCALE"
 };
 
 /**
  * dither(image, algorithm, options)
  *
- * Applies the selected dithering algorithm to the image.
+ * Applies the selected algorithm to the image.
  *
  * @param {Object} image - An object with width, height, and data (RGBA flat array).
  * @param {String} algorithm - One of the ALGORITHMS keys.
@@ -74,8 +76,11 @@ export function dither(image, algorithm, options = {}) {
         return options.custom(image);
       }
       throw new Error("For CUSTOM algorithm, supply a custom function in options.custom");
+    case ALGORITHMS.GRAYSCALE:  // New case: Grayscale-only
+      toGrayscale(image);
+      return image;
     default:
-      throw new Error("Unknown dithering algorithm: " + algorithm);
+      throw new Error("Unknown algorithm: " + algorithm);
   }
 }
 
