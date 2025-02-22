@@ -46,6 +46,27 @@ const { file, scale } = program.opts();
 // Finally, extract print data from the image and send it to the device.
 const printableImgPath = await makeDitheredImage(file, scale);
 const characteristic = await getDeviceCharacteristicMenu(printableImgPath);
+
+// ----- NEW: Ask user whether to adjust printer density -----
+const adjustDensity = await confirm({ 
+  message: "Would you like to adjust printer density (black intensity)?" 
+});
+if (adjustDensity) {
+  // Prompt the user to select a density level.
+  // Soft, Medium, and Strong correspond to different density bytes.
+  const densityLevel = await select({
+    message: "Select desired density level:",
+    choices: [
+      { name: "Soft", value: 0x40 },
+      { name: "Medium", value: 0x80 },
+      { name: "Strong", value: 0xff }
+    ],
+    pageSize: 3,
+  });
+  await sendDensityControlPacket(characteristic, densityLevel);
+}
+// ---------------------------------------------------------
+
 const data = await getPrintDataFromPort(printableImgPath);
 characteristic.write(Buffer.from(data), true);
 
@@ -331,4 +352,23 @@ async function convertToDithered(resizedImgPath) {
         resolve(ditheredImgPath);
       });
   });
+}
+
+// ----- NEW HELPER FUNCTION -----
+async function sendDensityControlPacket(characteristic, density) {
+  // Build the packet using a minimal header and command sequence.
+  // The density control byte is placed at offset 22.
+  const packet = [
+    0x02, 0x08, 0x00, 0x1a,
+    0x00, 0x16, 0x00, 0x41,
+    0x00, 0x0b, 0xff, 0x23,
+    0x01, 0x1b, 0x40, 0x1f,
+    0x11, 0x02, 0x04, 0x1f,
+    0x11, 0x37, density, 0x1f,
+    0x11, 0x0b, 0x1f, 0x11,
+    0x35, 0x00, 0x86
+  ];
+  // Write the packet to the printer.
+  characteristic.write(Buffer.from(packet), true);
+  console.log(`Density control packet sent with density: 0x${density.toString(16)}`);
 }
