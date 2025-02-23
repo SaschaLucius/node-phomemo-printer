@@ -20,6 +20,28 @@ const BYTES_PER_LINE = 70;
 // Each byte stands for 8 pixels, so we multiply.
 const IMAGE_WIDTH = BYTES_PER_LINE * 8;
 
+/**
+ * Printer Resolution and Image Width Calculation:
+ *
+ * This printer is designed to work at a resolution of 300 pixels per inch (ppi).
+ *
+ * The constant BYTES_PER_LINE is set to 70, indicating the printer expects 70 bytes per line.
+ * Since each byte represents 8 pixels, the maximum image width in pixels is calculated as:
+ *
+ *    IMAGE_WIDTH = BYTES_PER_LINE * 8
+ *                = 70 * 8
+ *                = 560 pixels
+ *
+ * At 300 ppi, the physical print width is:
+ *
+ *    Physical width (in inches) = IMAGE_WIDTH / 300
+ *                               = 560 / 300 ≈ 1.87 inches
+ *
+ *    Physical width (in cm) = 1.87 * 2.54 ≈ 4.75 cm
+ *
+ * This means that with the current configuration, the printed image will have a width of approximately 4.75 cm.
+ */
+
 // Special keys for device selection menu.
 const SCAN_AGAIN_SELECTION = "__scan_again__";
 const QUIT_SELECTION = "__quit__";
@@ -94,18 +116,7 @@ const characteristic = await getDeviceCharacteristicMenu(printableImgPath);
 const adjustDensity = await confirm({
   message: "Would you like to adjust printer density (black intensity)?",
 });
-if (adjustDensity) {
-  // Prompt the user to select a density level.
-  // Soft, Medium, and Strong correspond to different density bytes.
-  const densityLevel = await select({
-    message: "Select desired density level:",
-    choices: [
-      { name: "Soft", value: 0x40 },
-      { name: "Medium", value: 0x80 },
-      { name: "Strong", value: 0xff },
-    ],
-    pageSize: 3,
-  });
+if (densityLevel !== 0x5e) {
   await sendDensityControlPacket(characteristic, densityLevel);
 }
 // ---------------------------------------------------------
