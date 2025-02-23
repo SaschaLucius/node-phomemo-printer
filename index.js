@@ -112,9 +112,26 @@ const algorithmChoice = await select({
 const printableImgPath = await makeDitheredImage(file, scale, algorithmChoice);
 const characteristic = await getDeviceCharacteristicMenu(printableImgPath);
 
-// ----- NEW: Ask user whether to adjust printer density -----
-const adjustDensity = await confirm({
-  message: "Would you like to adjust printer density (black intensity)?",
+// Prompt the user to select a density level.
+// Soft, Medium, and Strong correspond to different density bytes.
+const densityLevel = await select({
+  message: "Select desired density level:",
+  choices: [
+    { name: "Lowest", value: 0x00 },
+    { name: "Very Soft", value: 0x1a },
+    { name: "Soft", value: 0x33 },
+    { name: "Light", value: 0x4d },
+    { name: "Default", value: 0x5e }, // at least it looks like this value is the default
+    { name: "Medium Soft", value: 0x66 },
+    { name: "Midtone", value: 0x80 },
+    { name: "Medium", value: 0x99 },
+    { name: "Medium Strong", value: 0xb3 },
+    { name: "Strong", value: 0xcc },
+    { name: "Very Strong", value: 0xe6 },
+    { name: "Highest", value: 0xff },
+  ],
+  default: "Default",
+  pageSize: 12,
 });
 if (densityLevel !== 0x5e) {
   await sendDensityControlPacket(characteristic, densityLevel);
