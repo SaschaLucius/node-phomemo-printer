@@ -37,9 +37,12 @@ const IMAGE_WIDTH = BYTES_PER_LINE * 8;
  *    Physical width (in inches) = IMAGE_WIDTH / 300
  *                               = 560 / 300 ≈ 1.87 inches
  *
+ * Converting inches to centimeters (1 inch ≈ 2.54 cm):
+ *
  *    Physical width (in cm) = 1.87 * 2.54 ≈ 4.75 cm
  *
- * This means that with the current configuration, the printed image will have a width of approximately 4.75 cm.
+ * Since the paper width is limited, if your image is wider than tall (landscape),
+ * you may want to rotate it by 90° so that it prints as large as possible.
  */
 
 // Special keys for device selection menu.
@@ -68,7 +71,7 @@ program
     "Run in test mode and generate dithered images for all algorithms"
   );
 program.parse(process.argv);
-const { file, scale, test } = program.opts();
+let { file, scale, test } = program.opts();
 
 if (test) {
   // In test mode: create the 'test' folder if it doesn't exist.
@@ -95,6 +98,26 @@ if (test) {
     }
   }
   process.exit(0);
+}
+
+// Check image dimensions and optionally rotate if image is in landscape mode.
+const dimensions = await getImageDimensions(file); // Assumes returns { width, height }
+if (dimensions.width > dimensions.height) {
+  // Prompt user if they want to rotate the image.
+  const rotateChoice = await select({
+    message:
+      "The image is wider than it is tall. Rotate image for maximum print size?",
+    choices: [
+      { name: "Yes", value: true },
+      { name: "No", value: false },
+    ],
+    default: "Yes",
+    pageSize: 2,
+  });
+  if (rotateChoice) {
+    // rotateImage should rotate the image 90° (counter-clockwise or clockwise as desired)
+    file = await rotateImage(file);
+  }
 }
 
 // Create a selection prompt using keys from ALGORITHMS.
@@ -558,4 +581,27 @@ async function sendDensityControlPacket(characteristic, density) {
   console.log(
     `Density control packet sent with density: 0x${density.toString(16)}`
   );
+}
+
+/**
+ * Returns an object with the image dimensions ({ width, height }).
+ * Uses Jimp to load the image and extract its dimensions.
+ */
+async function getImageDimensions(filePath) {
+  const image = await Jimp.read(filePath);
+  return { width: image.bitmap.width, height: image.bitmap.height };
+}
+
+/**
+ * Rotates the image by 90° clockwise to maximize printed size.
+ * The rotated image is saved to a new file, and its path is returned.
+ */
+async function rotateImage(filePath) {
+  const image = await Jimp.read(filePath);
+  // Rotate image by 90 degrees clockwise.
+  image.rotate(90);
+  // Create a new file name for the rotated image.
+  const rotatedPath = filePath.replace(/(\.[\w\d_-]+)$/i, "-rotated$1");
+  await image.writeAsync(rotatedPath);
+  return rotatedPath;
 }
